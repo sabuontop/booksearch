@@ -11,9 +11,11 @@ from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 import secrets
 from functools import wraps
+from datetime import timedelta
 
 app = Flask(__name__)
 app.secret_key = os.environ.get('FLASK_SECRET', secrets.token_hex(32))
+app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(minutes=5)
 CORS(app)
 
 # Rate limiter — protège contre le brute force
@@ -352,6 +354,7 @@ def login():
     error = None
     if request.method == 'POST':
         if request.form.get('password') == SEARCH_PASSWORD:
+            session.permanent = True
             session['logged_in'] = True
             return redirect(url_for('index'))
         error = 'Mot de passe incorrect. (5 tentatives max / 15 min)'
