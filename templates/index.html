@@ -1,0 +1,738 @@
+<!DOCTYPE html>
+<html lang="fr">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BookSearch — Recherche de Livres</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        *,
+        *::before,
+        *::after {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        :root {
+            --bg: #0a0a0f;
+            --surface: rgba(255, 255, 255, 0.05);
+            --border: rgba(255, 255, 255, 0.1);
+            --primary: #6366f1;
+            --primary2: #a855f7;
+            --text: #f1f5f9;
+            --muted: rgba(255, 255, 255, 0.4);
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+        }
+
+        /* ── HEADER ── */
+        header {
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            background: rgba(10, 10, 15, 0.85);
+            backdrop-filter: blur(20px);
+            border-bottom: 1px solid var(--border);
+            padding: 0 2rem;
+            display: flex;
+            align-items: center;
+            gap: 2rem;
+            height: 64px;
+        }
+
+        .brand {
+            font-size: 1.25rem;
+            font-weight: 800;
+            background: linear-gradient(135deg, var(--primary), var(--primary2));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            white-space: nowrap;
+        }
+
+        .search-bar {
+            flex: 1;
+            max-width: 600px;
+            display: flex;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            overflow: hidden;
+            transition: border-color 0.2s, box-shadow 0.2s;
+        }
+
+        .search-bar:focus-within {
+            border-color: var(--primary);
+            box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.2);
+        }
+
+        .search-bar input {
+            flex: 1;
+            background: transparent;
+            border: none;
+            color: var(--text);
+            padding: 0.625rem 1rem;
+            font-size: 0.95rem;
+            outline: none;
+        }
+
+        .search-bar input::placeholder {
+            color: var(--muted);
+        }
+
+        .search-bar button {
+            background: linear-gradient(135deg, var(--primary), var(--primary2));
+            border: none;
+            color: #fff;
+            padding: 0 1.25rem;
+            font-weight: 700;
+            cursor: pointer;
+            font-size: 0.9rem;
+            transition: opacity 0.2s;
+        }
+
+        .search-bar button:hover {
+            opacity: 0.85;
+        }
+
+        .logout-btn {
+            background: transparent;
+            border: 1px solid var(--border);
+            color: var(--muted);
+            border-radius: 8px;
+            padding: 0.4rem 0.75rem;
+            font-size: 0.8rem;
+            cursor: pointer;
+            text-decoration: none;
+            white-space: nowrap;
+            transition: color 0.2s, border-color 0.2s;
+        }
+
+        .logout-btn:hover {
+            color: var(--text);
+            border-color: var(--text);
+        }
+
+        /* ── MAIN ── */
+        main {
+            padding: 2rem;
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        .section-title {
+            font-size: 1.1rem;
+            font-weight: 700;
+            margin-bottom: 1.5rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            color: var(--text);
+        }
+
+        .section-title span {
+            color: var(--muted);
+            font-weight: 400;
+            font-size: 0.9rem;
+        }
+
+        /* ── LOADING ── */
+        #loading {
+            display: none;
+            text-align: center;
+            padding: 4rem;
+            color: var(--muted);
+        }
+
+        .spinner {
+            width: 40px;
+            height: 40px;
+            border: 3px solid var(--border);
+            border-top-color: var(--primary);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+            margin: 0 auto 1rem;
+        }
+
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+
+        /* ── BOOK GRID ── */
+        .book-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+            gap: 1.5rem;
+        }
+
+        .book-card {
+            cursor: pointer;
+            position: relative;
+        }
+
+        .book-card:hover .book-cover {
+            transform: translateY(-8px);
+            box-shadow: 0 24px 48px -8px rgba(0, 0, 0, 0.6);
+        }
+
+        .book-card:hover .book-cover img {
+            filter: brightness(0.45);
+        }
+
+        .book-card:hover .book-overlay {
+            opacity: 1;
+        }
+
+        .book-cover {
+            position: relative;
+            aspect-ratio: 2/3;
+            border-radius: 10px;
+            overflow: hidden;
+            background: #1e1e2e;
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+        }
+
+        .book-cover img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            transition: filter 0.3s ease;
+        }
+
+        .book-cover::after {
+            content: '';
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            height: 50%;
+            background: linear-gradient(transparent, rgba(0, 0, 0, 0.65));
+            pointer-events: none;
+        }
+
+        .book-overlay {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            opacity: 0;
+            transition: opacity 0.3s ease;
+            z-index: 2;
+            padding: 1rem;
+            text-align: center;
+        }
+
+        .overlay-content {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .overlay-title {
+            font-size: 0.8rem;
+            font-weight: 700;
+            color: #fff;
+            line-height: 1.3;
+            display: -webkit-box;
+            -webkit-line-clamp: 4;
+            line-clamp: 4;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+        }
+
+        .overlay-info {
+            font-size: 0.68rem;
+            background: rgba(255, 255, 255, 0.15);
+            padding: 0.15rem 0.5rem;
+            border-radius: 20px;
+            color: rgba(255, 255, 255, 0.8);
+            backdrop-filter: blur(4px);
+        }
+
+        .overlay-btn {
+            background: linear-gradient(135deg, var(--primary), var(--primary2));
+            border: none;
+            border-radius: 8px;
+            padding: 0.45rem 0.9rem;
+            color: #fff;
+            font-size: 0.78rem;
+            font-weight: 700;
+            cursor: pointer;
+            transition: opacity 0.2s;
+        }
+
+        .overlay-btn:hover {
+            opacity: 0.85;
+        }
+
+        .source-badge {
+            position: absolute;
+            top: 7px;
+            left: 7px;
+            font-size: 0.6rem;
+            font-weight: 700;
+            padding: 0.15rem 0.45rem;
+            border-radius: 6px;
+            z-index: 3;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            backdrop-filter: blur(4px);
+        }
+
+        .badge-anna {
+            background: rgba(234, 179, 8, 0.85);
+            color: #000;
+        }
+
+        .badge-libgen {
+            background: rgba(99, 102, 241, 0.85);
+            color: #fff;
+        }
+
+        .badge-other {
+            background: rgba(34, 197, 94, 0.85);
+            color: #000;
+        }
+
+        .book-meta {
+            padding: 0.5rem 0.2rem 0;
+        }
+
+        .book-meta-title {
+            font-size: 0.78rem;
+            font-weight: 600;
+            color: var(--text);
+            line-height: 1.3;
+            margin-bottom: 0.15rem;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+        }
+
+        .book-meta-info {
+            font-size: 0.68rem;
+            color: var(--muted);
+        }
+
+        /* ── MODAL ── */
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.7);
+            backdrop-filter: blur(6px);
+            z-index: 200;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .modal-overlay.open {
+            display: flex;
+        }
+
+        .modal {
+            background: #12121a;
+            border: 1px solid var(--border);
+            border-radius: 20px;
+            padding: 2rem;
+            width: 100%;
+            max-width: 560px;
+            max-height: 85vh;
+            overflow-y: auto;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+            animation: slideUp 0.25s ease;
+        }
+
+        @keyframes slideUp {
+            from {
+                transform: translateY(20px);
+                opacity: 0;
+            }
+
+            to {
+                transform: translateY(0);
+                opacity: 1;
+            }
+        }
+
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 1.5rem;
+            gap: 1rem;
+        }
+
+        .modal-title {
+            font-size: 1.1rem;
+            font-weight: 700;
+            line-height: 1.4;
+        }
+
+        .modal-close {
+            background: transparent;
+            border: none;
+            color: var(--muted);
+            font-size: 1.5rem;
+            cursor: pointer;
+            flex-shrink: 0;
+        }
+
+        .modal-close:hover {
+            color: var(--text);
+        }
+
+        .modal-section-title {
+            font-size: 0.75rem;
+            font-weight: 600;
+            color: var(--muted);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-bottom: 0.75rem;
+            display: flex;
+            align-items: center;
+            gap: 0.4rem;
+        }
+
+        .links-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 0.75rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .link-btn {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 0.75rem 1rem;
+            color: var(--text);
+            font-size: 0.85rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            text-align: left;
+        }
+
+        .link-btn:hover {
+            background: rgba(255, 255, 255, 0.1);
+            border-color: var(--primary);
+            color: var(--primary);
+        }
+
+        .link-btn.fast {
+            background: linear-gradient(135deg, rgba(99, 102, 241, 0.2), rgba(168, 85, 247, 0.2));
+            border-color: rgba(99, 102, 241, 0.4);
+        }
+
+        .link-btn.fast:hover {
+            background: linear-gradient(135deg, rgba(99, 102, 241, 0.35), rgba(168, 85, 247, 0.35));
+        }
+
+        /* ── TOAST ── */
+        #toast {
+            position: fixed;
+            bottom: 2rem;
+            right: 2rem;
+            background: #1e1e2e;
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 1rem 1.5rem;
+            color: var(--text);
+            font-size: 0.9rem;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.3);
+            transform: translateY(100px);
+            opacity: 0;
+            transition: all 0.3s ease;
+            z-index: 300;
+        }
+
+        #toast.show {
+            transform: translateY(0);
+            opacity: 1;
+        }
+
+        #toast.success {
+            border-left: 4px solid #22c55e;
+        }
+
+        #toast.error {
+            border-left: 4px solid #ef4444;
+        }
+
+        #toast.info {
+            border-left: 4px solid var(--primary);
+        }
+
+        /* ── EMPTY STATE ── */
+        .empty-state {
+            text-align: center;
+            padding: 4rem 2rem;
+            color: var(--muted);
+        }
+
+        .empty-state .big-icon {
+            font-size: 4rem;
+            margin-bottom: 1rem;
+            display: block;
+        }
+
+        @media (max-width: 640px) {
+            header {
+                padding: 0 1rem;
+                gap: 1rem;
+            }
+
+            main {
+                padding: 1rem;
+            }
+
+            .book-grid {
+                grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+                gap: 1rem;
+            }
+        }
+    </style>
+</head>
+
+<body>
+
+    <header>
+        <span class="brand">📚 BookSearch</span>
+        <div class="search-bar">
+            <input type="text" id="searchInput" placeholder="Titre, auteur, ISBN..." autocomplete="off">
+            <button onclick="doSearch()">Chercher</button>
+        </div>
+        <a href="/logout" class="logout-btn">Déconnexion</a>
+    </header>
+
+    <main>
+        <div id="loading">
+            <div class="spinner"></div>
+            <p>Recherche sur Anna's Archive & LibGen...</p>
+        </div>
+
+        <div id="trendingSection">
+            <p class="section-title">⚡ Tendances</p>
+            <div class="book-grid" id="trendingGrid"></div>
+        </div>
+
+        <div id="resultsSection" style="display:none">
+            <p class="section-title" id="resultsTitle">Résultats</p>
+            <div class="book-grid" id="resultsGrid"></div>
+        </div>
+
+        <div class="empty-state" id="emptyState" style="display:none">
+            <span class="big-icon">🔍</span>
+            <p>Aucun résultat trouvé. Essayez un autre titre ou auteur.</p>
+        </div>
+    </main>
+
+    <!-- Modal -->
+    <div class="modal-overlay" id="modalOverlay" onclick="closeModal(event)">
+        <div class="modal">
+            <div class="modal-header">
+                <h2 class="modal-title" id="modalTitle"></h2>
+                <button class="modal-close" onclick="closeModal()">✕</button>
+            </div>
+            <div id="modalContent"></div>
+        </div>
+    </div>
+
+    <div id="toast"></div>
+
+    <script>
+        const searchInput = document.getElementById('searchInput');
+        searchInput.addEventListener('keydown', e => { if (e.key === 'Enter') doSearch(); });
+
+        function getSourceBadgeClass(source) {
+            const s = source.toLowerCase();
+            if (s.includes('anna')) return 'badge-anna';
+            if (s.includes('libgen')) return 'badge-libgen';
+            return 'badge-other';
+        }
+
+        function buildCard(book) {
+            const card = document.createElement('div');
+            card.className = 'book-card';
+
+            const infoHtml = book.info
+                ? `<div class="overlay-info">${book.info}</div>` : '';
+
+            card.innerHTML = `
+        <div class="book-cover">
+            <img src="${book.coverUrl || ''}" alt="${book.title}"
+                 onerror="this.src=generatePlaceholder('${encodeURIComponent(book.title.slice(0, 2))}')">
+            <div class="book-overlay">
+                <div class="overlay-content">
+                    <div class="overlay-title">${book.title}</div>
+                    ${infoHtml}
+                    <button class="overlay-btn">⬇ Télécharger</button>
+                </div>
+            </div>
+            <div class="source-badge ${getSourceBadgeClass(book.source)}">${book.source}</div>
+        </div>
+        <div class="book-meta">
+            <div class="book-meta-title">${book.title}</div>
+            ${book.info ? `<div class="book-meta-info">${book.info}</div>` : ''}
+        </div>`;
+
+            card.addEventListener('click', () => showOptions(book));
+            return card;
+        }
+
+        function generatePlaceholder(initials) {
+            const colors = [['#6366f1', '#8b5cf6'], ['#f59e0b', '#ef4444'], ['#10b981', '#3b82f6'], ['#ec4899', '#8b5cf6']];
+            const i = (initials.charCodeAt(0) || 0) % colors.length;
+            const [c1, c2] = colors[i];
+            const text = decodeURIComponent(initials).toUpperCase();
+            const svg = `<svg xmlns='http://www.w3.org/2000/svg' width='200' height='300'>
+        <defs><linearGradient id='g' x1='0%' y1='0%' x2='100%' y2='100%'>
+            <stop offset='0%' stop-color='${c1}'/><stop offset='100%' stop-color='${c2}'/>
+        </linearGradient></defs>
+        <rect width='200' height='300' fill='url(#g)'/>
+        <text x='100' y='165' font-family='system-ui' font-size='60' font-weight='bold'
+            fill='rgba(255,255,255,0.9)' text-anchor='middle' dominant-baseline='middle'>${text}</text>
+    </svg>`;
+            return 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
+        }
+
+        // Chargement des tendances
+        fetch('/api/trending').then(r => r.json()).then(books => {
+            const grid = document.getElementById('trendingGrid');
+            books.forEach(book => grid.appendChild(buildCard(book)));
+        }).catch(() => { });
+
+        function doSearch() {
+            const q = searchInput.value.trim();
+            if (!q) return;
+
+            document.getElementById('trendingSection').style.display = 'none';
+            document.getElementById('resultsSection').style.display = 'none';
+            document.getElementById('emptyState').style.display = 'none';
+            document.getElementById('loading').style.display = 'block';
+
+            fetch(`/api/search?q=${encodeURIComponent(q)}`)
+                .then(r => r.json())
+                .then(books => {
+                    document.getElementById('loading').style.display = 'none';
+                    if (!books || books.length === 0) {
+                        document.getElementById('emptyState').style.display = 'block';
+                        return;
+                    }
+                    const grid = document.getElementById('resultsGrid');
+                    grid.innerHTML = '';
+                    books.forEach(book => grid.appendChild(buildCard(book)));
+                    document.getElementById('resultsTitle').textContent =
+                        `🔍 ${books.length} résultat${books.length > 1 ? 's' : ''} pour "${q}"`;
+                    document.getElementById('resultsSection').style.display = 'block';
+                })
+                .catch(() => {
+                    document.getElementById('loading').style.display = 'none';
+                    showToast('Erreur de connexion au moteur de recherche.', 'error');
+                });
+        }
+
+        function showOptions(book) {
+            // Si c'est un lien de tendance (recherche)
+            if (book.url && book.url.startsWith('/search?q=')) {
+                const q = new URLSearchParams(book.url.slice(8)).get('q');
+                if (q) { searchInput.value = q; doSearch(); return; }
+            }
+
+            // LibGen : téléchargement direct
+            if (book.source === 'LibGen' && book.url) {
+                download(book.url, book.title, 'direct');
+                return;
+            }
+
+            // Anna's Archive : afficher les liens
+            if (book.url) {
+                document.getElementById('modalTitle').textContent = book.title;
+                document.getElementById('modalContent').innerHTML = '<div class="spinner" style="margin: 2rem auto"></div>';
+                document.getElementById('modalOverlay').classList.add('open');
+
+                fetch(`/api/details?url=${encodeURIComponent(book.url)}`)
+                    .then(r => r.json())
+                    .then(data => {
+                        if (!data) { document.getElementById('modalContent').innerHTML = '<p style="color:var(--muted)">Aucun lien disponible.</p>'; return; }
+                        let html = '';
+                        if (data.external && data.external.length > 0) {
+                            html += `<p class="modal-section-title">⚡ Miroirs Rapides</p><div class="links-grid">`;
+                            data.external.forEach(l => {
+                                html += `<button class="link-btn fast" onclick="download('${l.url}','${book.title.replace(/'/g, "\\'")}','external')">⬇ ${l.text}</button>`;
+                            });
+                            html += '</div>';
+                        }
+                        if (data.slow && data.slow.length > 0) {
+                            html += `<p class="modal-section-title">🕐 Serveurs Lents</p><div class="links-grid">`;
+                            data.slow.forEach(l => {
+                                html += `<button class="link-btn" onclick="download('${l.url}','${book.title.replace(/'/g, "\\'")}','slow')">▶ ${l.text}</button>`;
+                            });
+                            html += '</div>';
+                        }
+                        if (!html) html = '<p style="color:var(--muted)">Aucun lien disponible.</p>';
+                        document.getElementById('modalContent').innerHTML = html;
+                    })
+                    .catch(() => {
+                        document.getElementById('modalContent').innerHTML = '<p style="color:var(--muted)">Erreur de chargement.</p>';
+                    });
+            }
+        }
+
+        function closeModal(event) {
+            if (!event || event.target === document.getElementById('modalOverlay')) {
+                document.getElementById('modalOverlay').classList.remove('open');
+            }
+        }
+
+        function download(url, title, type) {
+            const filename = title.replace(/[^\w\sàâäéèêëîïôöùûüç.-]/gi, '').trim()
+                + (title.toLowerCase().includes('.pdf') ? '.pdf' : '.epub');
+
+            showToast(`Téléchargement de "${filename.slice(0, 30)}..."`, 'info');
+            document.getElementById('modalOverlay').classList.remove('open');
+
+            fetch('/api/download', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ url, filename, type })
+            })
+                .then(r => r.json())
+                .then(data => {
+                    if (data.success) showToast('✅ Livre envoyé dans le Bookdrop !', 'success');
+                    else showToast('❌ ' + data.message, 'error');
+                })
+                .catch(() => showToast('❌ Erreur de connexion.', 'error'));
+        }
+
+        let toastTimer;
+        function showToast(msg, type = 'info') {
+            const t = document.getElementById('toast');
+            t.textContent = msg;
+            t.className = `show ${type}`;
+            clearTimeout(toastTimer);
+            toastTimer = setTimeout(() => { t.className = ''; }, 4000);
+        }
+    </script>
+</body>
+
+</html>
