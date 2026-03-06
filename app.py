@@ -187,95 +187,157 @@ class BookDownloader:
                 for a in soup.find_all('a', href=re.compile(r'/slow_download/')):
                     slow_url = self.current_annas + a['href']
                     wait_time = 0
-                    m = re.search(r'(\d+)\s*sec', a.get_text(), re.I)
-                    if m: wait_time = int(m.group(1))
-                    links['slow'].append({'url': slow_url, 'text': f"Lent ({wait_time}s)", 'wait': wait_time})
-                for a in soup.find_all('a', href=re.compile(r'libgen|library\.lol|zlibrary|b-ok', re.I)):
-                    href = a.get('href', '')
-                    if href.startswith('http'):
-                        links['external'].append({'url': href, 'text': a.get_text().strip()[:40]})
+                    try:
+                        slow_page = self.session.get(slow_url, timeout=10)
+                        m = re.search(r'([0-9]+)\s*secondes', slow_page.text)
+                        if m: wait_time = int(m.group(1))
+                    except: pass
+                    links['slow'].append({'text': a.get_text().strip(), 'url': slow_url, 'wait_time': wait_time})
+                
+                ext_div = soup.find(['h3', 'div'], string=re.compile(r'téléchargements externes|external downloads', re.I))
+                if not ext_div:
+                    for tag in soup.find_all(['h3', 'div']):
+                        if any(x in tag.get_text().lower() for x in ['externe', 'external']):
+                            ext_div = tag
+                            break
+                if ext_div:
+                    container = ext_div.find_parent()
+                    for a in container.find_all('a', href=True):
+                        href, text = a['href'], a.get_text().strip()
+                        if 'z-lib' in href.lower() or 'z-library' in href.lower():
+                            match = re.search(r'/md5/([a-f0-9]+)', href)
+                            if match:
+                                href = f"https://z-lib.sk/md5/{match.group(1)}"
+                                text = "Z-Library"
+                        if any(x in href.lower() for x in ['libgen', 'z-lib', 'ipfs', 'library.lol']):
+                            links['external'].append({'text': text, 'url': href})
                 return links
         except Exception as e:
-            print(f"Details error: {e}")
-        return {'slow': [], 'external': []}
+            print(f"Error Anna details: {e}")
+        return None
 
     def download_file(self, url, filename):
         try:
-            r = self.session.get(url, timeout=30, stream=True)
-            if r.status_code == 200:
-                ct = r.headers.get('Content-Type', '')
-                if 'text/html' in ct:
-                    return False, "Le lien renvoie une page HTML, pas un fichier."
-                path = os.path.join(DOWNLOAD_DIR, filename)
-                with open(path, 'wb') as f:
-                    for chunk in r.iter_content(8192):
-                        f.write(chunk)
-                return True, f"Téléchargé : {filename}"
-            return False, f"Erreur HTTP {r.status_code}"
+            filename = re.sub(r'[\\/*?:"<>|]', "", filename)
+            if not os.path.exists(DOWNLOAD_DIR): 
+                os.makedirs(DOWNLOAD_DIR, exist_ok=True)
+            
+            with self.session.get(url, stream=True, timeout=60, verify=False) as r:
+                r.raise_for_status()
+                
+                ext = ""
+                ct = r.headers.get('Content-Type', '').lower()
+                if 'application/pdf' in ct: ext = '.pdf'
+                elif 'epub' in ct: ext = '.epub'
+                elif 'mobi' in ct: ext = '.mobi'
+                
+                cd = r.headers.get('Content-Disposition', '')
+                if 'filename=' in cd:
+                    m = re.search(r'filename=["\']?([^"\';]+)', cd)
+                    if m: 
+                        real_ext = os.path.splitext(m.group(1))[-1].lower()
+                        if real_ext in ['.pdf', '.epub', '.mobi', '.azw3']: ext = real_ext
+
+                chunk_iter = r.iter_content(chunk_size=8192)
+                try:
+                    first_chunk = next(chunk_iter)
+                except StopIteration:
+                    first_chunk = b""
+                
+                if first_chunk.startswith(b"%PDF"):
+                    ext = '.pdf'
+                elif b"BOOKMOBI" in first_chunk[:1024]:
+                    ext = '.mobi'
+                elif first_chunk.startswith(b"PK\x03\x04"):
+                    if b"mimetypeapplication/epub+zip" in first_chunk[:1024] or not ext:
+                        ext = '.epub' if b"mimetype" in first_chunk else ext
+                
+                name, current_ext = os.path.splitext(filename)
+                if ext and current_ext.lower() != ext:
+                    filename = name + ext
+                    
+                filepath = os.path.join(DOWNLOAD_DIR, filename)
+                with open(filepath, 'wb') as f:
+                    if first_chunk: f.write(first_chunk)
+                    for chunk in chunk_iter:
+                        if chunk: f.write(chunk)
+            return True, filename
         except Exception as e:
             return False, str(e)
 
-    def download_slow(self, url, filename):
+    def download_slow(self, slow_url, filename):
+        import time
+        headers = {'Referer': self.current_annas + "/", 'Upgrade-Insecure-Requests': '1'}
         try:
-            r = self.session.get(url, timeout=120, stream=True)
-            if r.status_code == 200:
-                ct = r.headers.get('Content-Type', '')
-                if 'text/html' in ct:
-                    soup = BeautifulSoup(r.text, 'html.parser')
-                    final = soup.find('a', string=re.compile(r'download|télécharger', re.I))
-                    if final and final.get('href'):
-                        return self.download_file(final['href'], filename)
-                    return False, "Impossible de trouver le lien de téléchargement."
-                path = os.path.join(DOWNLOAD_DIR, filename)
-                with open(path, 'wb') as f:
-                    for chunk in r.iter_content(8192):
-                        f.write(chunk)
-                return True, f"Téléchargé : {filename}"
-            return False, f"Erreur HTTP {r.status_code}"
+            r = self.session.get(slow_url, headers=headers, timeout=30)
+            if "DDoS-Guard" in r.text or "Cloudflare" in r.text:
+                return False, "La sécurité bloque le téléchargement automatique. Utilisez un miroir externe."
+                
+            soup = BeautifulSoup(r.text, 'html.parser')
+            text_content = soup.get_text()
+            
+            m = re.search(r'([0-9]+)\s*second', text_content, re.I)
+            wait_time = int(m.group(1)) if m else 60
+            
+            time.sleep(wait_time + 2)
+            
+            r = self.session.get(slow_url, headers=headers, timeout=30)
+            soup = BeautifulSoup(r.text, 'html.parser')
+            final_link = None
+            for a in soup.find_all('a', href=True):
+                if any(x in a.get_text().lower() for x in ['download', 'télécharger']) or '/get/' in a['href']:
+                    final_link = a['href']
+                    if not final_link.startswith('http'): final_link = self.current_annas + final_link
+                    break
+            if final_link: return self.download_file(final_link, filename)
+            return False, "Lien final non trouvé après attente."
         except Exception as e:
             return False, str(e)
 
     def download_external(self, url, filename, config):
+        mirrors = ["libgen.li", "libgen.is", "libgen.rs", "libgen.st", "libgen.gs", "library.lol", "z-lib.sk", "libgen"]
         try:
-            session_ext = requests.Session()
-            session_ext.headers.update(self.headers)
-            r = session_ext.get(url, timeout=15, verify=False, allow_redirects=True)
-            soup = BeautifulSoup(r.text, 'html.parser')
-            base = "/".join(r.url.split('/')[:3])
-
-            # 1. Lien texte "GET" (library.lol classique)
-            get_link = soup.find('a', string=re.compile(r'^GET$', re.I))
-            if get_link and get_link.get('href'):
-                href = get_link['href']
-                if not href.startswith('http'): href = base + href
-                return self.download_file(href, filename)
-
-            # 2. Lien direct vers fichier epub/pdf/mobi
-            for a in soup.find_all('a', href=True):
-                href = a['href']
-                if re.search(r'\.(epub|pdf|mobi|azw3)(\?|$)', href, re.I):
-                    if not href.startswith('http'): href = base + href
-                    return self.download_file(href, filename)
-
-            # 3. Bouton/lien "Download" ou "Télécharger"
-            dl = soup.find('a', string=re.compile(r'download|t[ée]l[ée]charg', re.I))
-            if dl and dl.get('href') and not dl['href'].startswith('#'):
-                href = dl['href']
-                if not href.startswith('http'): href = base + href
-                return self.download_file(href, filename)
-
-            # 4. Lien library.lol imbriqué
-            lol = soup.find('a', href=re.compile(r'library\.lol', re.I))
-            if lol:
-                r2 = session_ext.get(lol['href'], timeout=15, verify=False)
-                soup2 = BeautifulSoup(r2.text, 'html.parser')
-                get2 = soup2.find('a', string=re.compile(r'GET', re.I))
-                if get2 and get2.get('href'):
-                    href = get2['href']
-                    if not href.startswith('http'): href = "/".join(lol['href'].split('/')[:3]) + href
-                    return self.download_file(href, filename)
-
-            return False, "Miroir inaccessible ou structure inconnue. Essayez un autre lien."
+            import requests
+            session = self.session
+            
+            verify_cert = True
+            if "library.lol" in url.lower() or "libgen" in url.lower():
+                verify_cert = False
+                
+            if any(d in url.lower() for d in mirrors):
+                import urllib3
+                if not verify_cert: urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+                
+                try:
+                    r = session.get(url, timeout=12, verify=verify_cert) 
+                except requests.exceptions.Timeout:
+                    return False, f"Le serveur miroir est hors ligne ou bloqué (Timeout)."
+                except requests.exceptions.SSLError:
+                    try:
+                        r = session.get(url, timeout=12, verify=False)
+                    except:
+                        return False, "Erreur de connexion sécurisée au miroir."
+                except Exception as e:
+                    return False, f"Erreur de connexion : {str(e)}"
+                    
+                soup = BeautifulSoup(r.text, 'html.parser')
+                z_down = soup.find('a', class_=re.compile(r'addDownloadedBook|download-button|btn-primary', re.I))
+                if not z_down: z_down = soup.find('a', string=re.compile(r'download|télécharger', re.I))
+                if z_down and z_down.get('href') and not z_down['href'].startswith('#'):
+                    final_url = z_down['href']
+                    if not final_url.startswith('http'): final_url = "/".join(url.split('/')[:3]) + ("/" if not final_url.startswith("/") else "") + final_url
+                    return self.download_file(final_url, filename)
+                get_link = soup.find('a', string=re.compile(r'GET', re.I))
+                if not get_link:
+                    lol = soup.find('a', href=re.compile(r'library\.lol|libgen'))
+                    if lol:
+                        soup = BeautifulSoup(session.get(lol['href'], timeout=12, verify=False).text, 'html.parser')
+                        get_link = soup.find('a', string=re.compile(r'GET', re.I))
+                if get_link:
+                    final_url = get_link['href']
+                    if not final_url.startswith('http'): final_url = "/".join(url.split('/')[:3]) + ("/" if not final_url.startswith("/") else "") + final_url
+                    return self.download_file(final_url, filename)
+            return False, "Automation not available for this link."
         except Exception as e:
             return False, str(e)
 
