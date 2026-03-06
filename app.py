@@ -239,15 +239,43 @@ class BookDownloader:
         try:
             session_ext = requests.Session()
             session_ext.headers.update(self.headers)
-            r = session_ext.get(url, timeout=15, verify=False)
+            r = session_ext.get(url, timeout=15, verify=False, allow_redirects=True)
             soup = BeautifulSoup(r.text, 'html.parser')
-            get_link = soup.find('a', string=re.compile(r'GET', re.I))
-            if get_link:
-                final_url = get_link['href']
-                if not final_url.startswith('http'):
-                    final_url = "/".join(url.split('/')[:3]) + final_url
-                return self.download_file(final_url, filename)
-            return False, "Lien GET introuvable."
+            base = "/".join(r.url.split('/')[:3])
+
+            # 1. Lien texte "GET" (library.lol classique)
+            get_link = soup.find('a', string=re.compile(r'^GET$', re.I))
+            if get_link and get_link.get('href'):
+                href = get_link['href']
+                if not href.startswith('http'): href = base + href
+                return self.download_file(href, filename)
+
+            # 2. Lien direct vers fichier epub/pdf/mobi
+            for a in soup.find_all('a', href=True):
+                href = a['href']
+                if re.search(r'\.(epub|pdf|mobi|azw3)(\?|$)', href, re.I):
+                    if not href.startswith('http'): href = base + href
+                    return self.download_file(href, filename)
+
+            # 3. Bouton/lien "Download" ou "Télécharger"
+            dl = soup.find('a', string=re.compile(r'download|t[ée]l[ée]charg', re.I))
+            if dl and dl.get('href') and not dl['href'].startswith('#'):
+                href = dl['href']
+                if not href.startswith('http'): href = base + href
+                return self.download_file(href, filename)
+
+            # 4. Lien library.lol imbriqué
+            lol = soup.find('a', href=re.compile(r'library\.lol', re.I))
+            if lol:
+                r2 = session_ext.get(lol['href'], timeout=15, verify=False)
+                soup2 = BeautifulSoup(r2.text, 'html.parser')
+                get2 = soup2.find('a', string=re.compile(r'GET', re.I))
+                if get2 and get2.get('href'):
+                    href = get2['href']
+                    if not href.startswith('http'): href = "/".join(lol['href'].split('/')[:3]) + href
+                    return self.download_file(href, filename)
+
+            return False, "Miroir inaccessible ou structure inconnue. Essayez un autre lien."
         except Exception as e:
             return False, str(e)
 
