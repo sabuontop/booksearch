@@ -30,6 +30,22 @@ limiter = Limiter(
 DOWNLOAD_DIR = os.environ.get('BOOKLORE_DIR', '/opt/booklore/bookdrop')
 CONFIG_FILE = os.environ.get('CONFIG_FILE', 'config.json')
 SEARCH_PASSWORD = os.environ.get('SEARCH_PASSWORD', 'changeme')
+NTFY_TOPIC = os.environ.get('NTFY_TOPIC', 'sabu')
+
+def send_notification(title, message):
+    if not NTFY_TOPIC: return
+    try:
+        requests.post(
+            f"https://ntfy.sh/{NTFY_TOPIC}",
+            data=message.encode('utf-8'),
+            headers={
+                "Title": title.encode('utf-8'),
+                "Tags": "green_book,book"
+            },
+            timeout=5
+        )
+    except Exception as e:
+        print(f"Erreur notif: {e}")
 
 # ── Auth ──────────────────────────────────────────────────────
 def login_required(f):
@@ -425,6 +441,10 @@ def api_download():
         success, msg = downloader.download_slow(url, filename)
     else:
         success, msg = downloader.download_file(url, filename)
+        
+    if success:
+        send_notification("Nouveau livre téléchargé", f"{filename} a été ajouté à la bibliothèque.")
+        
     return jsonify({'success': success, 'message': msg})
 
 @limiter.request_filter
