@@ -297,7 +297,7 @@ class BookDownloader:
             return False, str(e)
 
     def download_external(self, url, filename, config):
-        mirrors = ["libgen.li", "libgen.is", "libgen.rs", "libgen.st", "libgen.gs", "library.lol", "z-lib.sk", "libgen"]
+        mirrors = ["libgen.li", "libgen.is", "libgen.rs", "libgen.st", "libgen.gs", "library.lol", "z-lib.sk", "z-lib", "zlibrary", "libgen"]
         try:
             import requests
             import cloudscraper
