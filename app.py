@@ -27,9 +27,9 @@ limiter = Limiter(
 )
 
 # Config
-DOWNLOAD_DIR = os.environ.get('BOOKLORE_DIR', '/opt/booklore/bookdrop')
+DOWNLOAD_DIR = os.environ.get('BOOKLORE_DIR', '/srv/booklore/bookdrop')
 CONFIG_FILE = os.environ.get('CONFIG_FILE', 'config.json')
-SEARCH_PASSWORD = os.environ.get('SEARCH_PASSWORD', 'changeme')
+SEARCH_PASSWORD = os.environ.get('SEARCH_PASSWORD', 'Sabuuu92i@08')
 
 # ── Auth ──────────────────────────────────────────────────────
 def login_required(f):
