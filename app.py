@@ -300,7 +300,19 @@ class BookDownloader:
         mirrors = ["libgen.li", "libgen.is", "libgen.rs", "libgen.st", "libgen.gs", "library.lol", "z-lib.sk", "libgen"]
         try:
             import requests
+            import cloudscraper
             session = self.session
+            
+            # Use cloudscraper for Z-Library to bypass Cloudflare
+            if "z-lib" in url.lower():
+                scraper = cloudscraper.create_scraper(
+                    browser={
+                        'browser': 'chrome',
+                        'platform': 'windows',
+                        'desktop': True
+                    }
+                )
+                session = scraper
             
             verify_cert = True
             if "library.lol" in url.lower() or "libgen" in url.lower():
@@ -311,12 +323,17 @@ class BookDownloader:
                 if not verify_cert: urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
                 
                 try:
-                    r = session.get(url, timeout=12, verify=verify_cert) 
+                    r = session.get(url, timeout=15, verify=verify_cert) 
+                    
+                    # If Cloudflare still blocks us with 403 or 503 despite cloudscraper
+                    if r.status_code in [403, 503] and "cloudflare" in r.text.lower():
+                        return False, "La protection Cloudflare de Z-Library bloque l'automatisation. Utilisez un miroir Libgen ou le téléchargement lent."
+                        
                 except requests.exceptions.Timeout:
                     return False, f"Le serveur miroir est hors ligne ou bloqué (Timeout)."
                 except requests.exceptions.SSLError:
                     try:
-                        r = session.get(url, timeout=12, verify=False)
+                        r = session.get(url, timeout=15, verify=False)
                     except:
                         return False, "Erreur de connexion sécurisée au miroir."
                 except Exception as e:
