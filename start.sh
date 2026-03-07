@@ -10,5 +10,5 @@ export BOOKLORE_DIR="${BOOKLORE_DIR:-/opt/booklore/bookdrop}"
 export CONFIG_FILE="${CONFIG_FILE:-/opt/search-app/config.json}"
 
 cd "$(dirname "$0")"
-exec ./venv/bin/gunicorn -w 1 -b 0.0.0.0:5000 app:app
+exec ./venv/bin/waitress-serve --host=0.0.0.0 --port=5000 app:app
 
