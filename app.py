@@ -206,12 +206,12 @@ class BookDownloader:
                     container = ext_div.find_parent()
                     for a in container.find_all('a', href=True):
                         href, text = a['href'], a.get_text().strip()
-                        if 'z-lib' in href.lower() or 'z-library' in href.lower():
-                            match = re.search(r'/md5/([a-f0-9]+)', href)
-                            if match:
-                                href = f"https://z-lib.sk/md5/{match.group(1)}"
-                                text = "Z-Library"
-                        if any(x in href.lower() for x in ['libgen', 'z-lib', 'ipfs', 'library.lol']):
+                        
+                        # SKIP Z-Library entirely since it strictly requires login to download now
+                        if 'z-lib' in href.lower() or 'zlibrary' in href.lower():
+                            continue
+                            
+                        if any(x in href.lower() for x in ['libgen', 'ipfs', 'library.lol']):
                             links['external'].append({'text': text, 'url': href})
                 return links
         except Exception as e:
