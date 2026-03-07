@@ -425,6 +425,14 @@ def api_download():
         success, msg = downloader.download_slow(url, filename)
     else:
         success, msg = downloader.download_file(url, filename)
+        
+    if success:
+        try:
+            import subprocess
+            subprocess.run(["curl", "-H", "Tags: green_book", "-H", "Title: Nouveau livre !", "-d", f"{filename} a été téléchargé", "https://ntfy.sh/sabu"], timeout=5)
+        except Exception as e:
+            print("Erreur curl:", e)
+            
     return jsonify({'success': success, 'message': msg})
 
 @limiter.request_filter
