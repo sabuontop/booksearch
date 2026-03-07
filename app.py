@@ -206,12 +206,12 @@ class BookDownloader:
                     container = ext_div.find_parent()
                     for a in container.find_all('a', href=True):
                         href, text = a['href'], a.get_text().strip()
-                        
-                        # SKIP Z-Library entirely since it strictly requires login to download now
-                        if 'z-lib' in href.lower() or 'zlibrary' in href.lower():
-                            continue
-                            
-                        if any(x in href.lower() for x in ['libgen', 'ipfs', 'library.lol']):
+                        if 'z-lib' in href.lower() or 'z-library' in href.lower():
+                            match = re.search(r'/md5/([a-f0-9]+)', href)
+                            if match:
+                                href = f"https://z-lib.sk/md5/{match.group(1)}"
+                                text = "Z-Library"
+                        if any(x in href.lower() for x in ['libgen', 'z-lib', 'ipfs', 'library.lol']):
                             links['external'].append({'text': text, 'url': href})
                 return links
         except Exception as e:
@@ -297,43 +297,25 @@ class BookDownloader:
             return False, str(e)
 
     def download_external(self, url, filename, config):
-        mirrors = ["libgen.li", "libgen.is", "libgen.rs", "libgen.st", "libgen.gs", "library.lol", "z-lib.sk", "z-lib", "zlibrary", "libgen"]
+        mirrors = ["libgen.li", "libgen.is", "libgen.rs", "libgen.st", "libgen.gs", "library.lol", "z-lib.sk", "libgen"]
         try:
             import requests
-            import cloudscraper
             session = self.session
-            
-            # Use cloudscraper for Z-Library to bypass Cloudflare
-            if "z-lib" in url.lower():
-                scraper = cloudscraper.create_scraper(
-                    browser={
-                        'browser': 'chrome',
-                        'platform': 'windows',
-                        'desktop': True
-                    }
-                )
-                session = scraper
             
             verify_cert = True
             if "library.lol" in url.lower() or "libgen" in url.lower():
                 verify_cert = False
-                
             if any(d in url.lower() for d in mirrors):
                 import urllib3
                 if not verify_cert: urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
                 
                 try:
-                    r = session.get(url, timeout=15, verify=verify_cert) 
-                    
-                    # If Cloudflare still blocks us with 403 or 503 despite cloudscraper
-                    if r.status_code in [403, 503] and "cloudflare" in r.text.lower():
-                        return False, "La protection Cloudflare de Z-Library bloque l'automatisation. Utilisez un miroir Libgen ou le téléchargement lent."
-                        
+                    r = session.get(url, timeout=12, verify=verify_cert) 
                 except requests.exceptions.Timeout:
                     return False, f"Le serveur miroir est hors ligne ou bloqué (Timeout)."
                 except requests.exceptions.SSLError:
                     try:
-                        r = session.get(url, timeout=15, verify=False)
+                        r = session.get(url, timeout=12, verify=False)
                     except:
                         return False, "Erreur de connexion sécurisée au miroir."
                 except Exception as e:
