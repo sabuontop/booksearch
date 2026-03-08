@@ -88,7 +88,7 @@ class BookDownloader:
         ]
         for mirror in mirrors:
             try:
-                r = self.session.get(f"{mirror}/search", params={'q': query}, timeout=15)
+                r = self.session.get(f"{mirror}/search", params={'q': query}, timeout=8)
                 if r.status_code != 200:
                     continue
                 self.current_annas = mirror
@@ -197,7 +197,7 @@ class BookDownloader:
                 if 'libgen.is' in mirror_url or 'libgen.rs' in mirror_url:
                     params = {'req': query, 'column': 'def', 'res': 25, 'sort': 'def'}
 
-                r = self.session.get(mirror_url, params=params, timeout=15, verify=False)
+                r = self.session.get(mirror_url, params=params, timeout=8, verify=False)
                 if r.status_code != 200:
                     continue
                 
@@ -316,7 +316,7 @@ class BookDownloader:
             base = base_urls[0]
             for b in base_urls:
                 try:
-                    r = scraper.get(f"{b}/?s={urllib.parse.quote(query)}", headers=headers, timeout=20)
+                    r = scraper.get(f"{b}/?s={urllib.parse.quote(query)}", headers=headers, timeout=8)
                     if r.status_code == 200 and len(r.text) > 2000:
                         html = r.text
                         base = b
@@ -630,33 +630,35 @@ def api_trending():
 @app.route('/api/search')
 @login_required
 def api_search():
-    from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError as FutureTimeout
+    from concurrent.futures import ThreadPoolExecutor, wait as fwait
 
     query = request.args.get('q', '')
     source = request.args.get('source', 'all')  # all | annas | libgen | bookys
     if not query:
         return jsonify([])
 
-    # Build tasks to run in parallel
-    tasks = {}
     with ThreadPoolExecutor(max_workers=3) as executor:
+        futures = {}
         if source in ('all', 'annas'):
-            tasks['annas'] = executor.submit(downloader.search_annasarchive, query)
+            futures[executor.submit(downloader.search_annasarchive, query)] = 'annas'
         if source in ('all', 'libgen'):
-            tasks['libgen'] = executor.submit(downloader.search_libgen, query)
+            futures[executor.submit(downloader.search_libgen, query)] = 'libgen'
         if source in ('all', 'bookys'):
-            tasks['bookys'] = executor.submit(downloader.search_bookys, query)
+            futures[executor.submit(downloader.search_bookys, query)] = 'bookys'
+
+        # Single global 12s timeout across ALL scrapers running in parallel
+        done, not_done = fwait(futures.keys(), timeout=12)
+
+        for future in not_done:
+            print(f"[search] {futures[future]} timed out")
+            future.cancel()
 
         results = []
-        # Wait at most 12s total for all scrapers to complete
-        for name, future in tasks.items():
+        for future in done:
             try:
-                res = future.result(timeout=12)
-                results.extend(res)
-            except FutureTimeout:
-                print(f"[search] {name} timed out after 12s, skipping")
+                results.extend(future.result())
             except Exception as e:
-                print(f"[search] {name} error: {e}")
+                print(f"[search] {futures.get(future,'?')} error: {e}")
 
     seen = set()
     unique = []
