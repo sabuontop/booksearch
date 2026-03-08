@@ -27,9 +27,9 @@ limiter = Limiter(
 )
 
 # Config
-DOWNLOAD_DIR = os.environ.get('BOOKLORE_DIR', '/srv/booklore/bookdrop')
+DOWNLOAD_DIR = os.environ.get('BOOKLORE_DIR', '/opt/booklore/bookdrop')
 CONFIG_FILE = os.environ.get('CONFIG_FILE', 'config.json')
-SEARCH_PASSWORD = os.environ.get('SEARCH_PASSWORD', 'Sabuuu92i@08')
+SEARCH_PASSWORD = os.environ.get('SEARCH_PASSWORD', 'changeme')
 
 # ── Auth ──────────────────────────────────────────────────────
 def login_required(f):
@@ -79,333 +79,155 @@ class BookDownloader:
 
     def search_annasarchive(self, query):
         results = []
-        # Try multiple mirrors in order until one works
-        mirrors = [
-            "https://fr.annas-archive.pk",   # works from VPS
-            "https://fr.annas-archive.gs",
-            "https://fr.annas-archive.se",
-            "https://fr.annas-archive.org",
-        ]
-        for mirror in mirrors:
-            try:
-                r = self.session.get(f"{mirror}/search", params={'q': query}, timeout=8)
-                if r.status_code != 200:
-                    continue
-                self.current_annas = mirror
+        url = f"{self.current_annas}/search"
+        params = {'q': query}
+        try:
+            r = self.session.get(url, params=params, timeout=15)
+            if r.status_code == 200:
                 soup = BeautifulSoup(r.text, 'html.parser')
-
-                # Anna's Archive uses Tailwind — rows are flex divs containing /md5/ links
-                # Multiple valid selectors to catch current + future layouts
-                items = soup.select('div.flex.pt-3.pb-3') or \
-                        soup.select('div[class*="border-b"]') or \
-                        [a.find_parent('div') for a in soup.find_all('a', href=re.compile(r'/md5/')) if a.find_parent('div')]
-
-                seen_ids = set()
-                for item in items[:30]:
-                    if not item: continue
-                    md5_link = item.find('a', href=re.compile(r'/md5/'))
-                    if not md5_link: continue
-
-                    md5 = md5_link['href'].split('/')[-1].split('?')[0]
-                    if md5 in seen_ids: continue
-                    seen_ids.add(md5)
-
-                    # Title: look for h3 first, else use the link text
-                    h3 = item.find('h3')
-                    raw_title = h3.get_text(' ', strip=True) if h3 else md5_link.get_text(' ', strip=True)
-                    raw_title = raw_title.strip()
-                    if not raw_title or len(raw_title) < 2 or raw_title.lower() in ['save', 'lire plus…', 'read more…']:
+                for a in soup.find_all('a', href=re.compile(r'/md5/')):
+                    h3 = a.find('h3')
+                    raw_title = h3.get_text().strip() if h3 else a.get_text().strip()
+                    if not raw_title or raw_title.lower() in ["save", "lire plus\u2026"]:
                         continue
 
-                    # Cover image
-                    img = item.find('img')
-                    cover_url = ''
-                    if img:
-                        src = img.get('src') or img.get('data-src') or ''
-                        cover_url = src if src.startswith('http') else (mirror + src if src.startswith('/') else '')
+                    # Couverture depuis Anna's Archive
+                    cover_img = a.find('img')
+                    cover_url = ""
+                    if cover_img and cover_img.get('src'):
+                        src = cover_img['src']
+                        cover_url = src if src.startswith('http') else (self.current_annas + src if src.startswith('/') else "")
 
-                    # Metadata line — the gray info string "fr, epub, 1.2MB, ..."
-                    info_raw = ''
-                    for div in item.find_all('div'):
-                        cls = ' '.join(div.get('class', []))
-                        txt = div.get_text(' ', strip=True)
-                        if any(k in cls for k in ['gray', 'muted', 'text-sm', 'overflow-hidden']) and any(f in txt.lower() for f in ['epub','pdf','mobi','mb','kb']):
-                            info_raw = txt
-                            break
+                    parent = a.find_parent()
+                    author, info = "", ""
+                    meta_divs = parent.find_all('div', class_=re.compile(r'text-gray-500|text-sm|italic', re.I))
+                    for div in meta_divs:
+                        txt = div.get_text().strip()
+                        if any(x in txt.lower() for x in ['epub', 'pdf', 'mobi', 'azw3']):
+                            info = txt
+                        elif not author and len(txt) > 2:
+                            author = txt
 
-                    # Parse: "French [fr], epub, 1.2MB, ..."
-                    fmt, size, author = '', '', ''
-                    if info_raw:
-                        parts = [p.strip() for p in info_raw.split(',')]
-                        for p in parts:
-                            pl = p.lower()
-                            if any(x in pl for x in ['epub','pdf','mobi','azw3']) and not fmt:
-                                fmt = p.strip()
-                            elif re.search(r'\d+\s*[kmg]b', pl) and not size:
-                                size = p.strip()
-                            elif '"' in p or "'" in p:
-                                # Likely "Title" by Author pattern — extract author name
-                                m = re.search(r'by (.+)$', p)
-                                if m: author = m.group(1).strip()
+                    clean_title = re.sub(r'\[.*?\]|\(.*?\)', '', raw_title).strip()
+                    clean_title = clean_title.split('/')[-1].split('\\')[-1].strip()
 
-                    info_parts = [x for x in [fmt.upper(), size, author] if x]
-                    info = ' · '.join(info_parts) if info_parts else ''
+                    if info:
+                        info = re.sub(r'(lgli|zlib|nexusstc|upload|md5)/.*?\s', '', info, flags=re.I).strip()
+                        if '/' in info: info = info.split('/')[-1]
+                        info = re.sub(r'\.(epub|pdf|mobi|azw3)\b', '', info, flags=re.I).strip()
 
-                    # Clean title
-                    clean = re.sub(r'\[.*?\]|\(.*?\)', '', raw_title).strip()
-                    clean = clean.split('/')[-1].strip()
+                    display_title = clean_title
+                    if author and author.lower() not in clean_title.lower():
+                        display_title = f"{clean_title} - {author}"
 
                     if not cover_url:
-                        cover_url = self._get_cover(clean)
+                        cover_url = self._get_cover(clean_title)
 
                     results.append({
                         'source': "Anna's Archive",
-                        'title': clean,
+                        'title': display_title,
                         'info': info,
-                        'url': mirror + md5_link['href'],
-                        'id': md5,
+                        'url': self.current_annas + a['href'],
+                        'id': a['href'].split('/')[-1],
                         'coverUrl': cover_url
                     })
 
-                if results:
-                    break  # Got results from this mirror, stop trying others
+                seen = set()
+                results = [r for r in results if r['id'] not in seen and not seen.add(r['id'])]
 
-            except Exception as e:
-                print(f"Anna's Archive mirror {mirror} failed: {e}")
-                continue
+                def get_score(res):
+                    t = res.get('info', '').lower()
+                    if 'epub' in t: return 0
+                    if 'pdf' in t: return 1
+                    return 2
+                results.sort(key=get_score)
 
-        def get_score(res):
-            t = res.get('info', '').lower()
-            if 'epub' in t: return 0
-            if 'pdf' in t: return 1
-            return 2
-        results.sort(key=get_score)
+        except Exception as e:
+            print(f"Error Anna's Archive: {e}")
         return results
 
     def search_libgen(self, query):
+        url = "https://libgen.li/index.php"
+        params = {'req': query, 'column': 'def'}
         results = []
-        mirrors = [
-            "https://libgen.li/index.php",   # works from VPS
-            "https://libgen.is/search.php",
-            "https://libgen.rs/search.php",
-        ]
-        
-        for mirror_url in mirrors:
-            try:
-                base = '/'.join(mirror_url.split('/')[:3])  # e.g. https://libgen.li
-                params = {'req': query, 'column': 'def', 'res': 25}
-                if 'libgen.is' in mirror_url or 'libgen.rs' in mirror_url:
-                    params = {'req': query, 'column': 'def', 'res': 25, 'sort': 'def'}
-
-                r = self.session.get(mirror_url, params=params, timeout=8, verify=False)
-                if r.status_code != 200:
-                    continue
-                
+        try:
+            r = self.session.get(url, params=params, timeout=15)
+            if r.status_code == 200:
                 soup = BeautifulSoup(r.text, 'html.parser')
-
-                # Try table id selectors in order of preference
-                table = soup.find('table', id='tablelibgen') or \
-                        soup.find('table', attrs={'class': re.compile(r'c$|catalog', re.I)}) or \
-                        soup.find('table', id='search_res')
-
-                if not table:
-                    # Last resort: find largest table on page
-                    tables = soup.find_all('table')
-                    table = max(tables, key=lambda t: len(t.find_all('tr')), default=None) if tables else None
-
-                if not table:
-                    continue
-
-                rows = table.find_all('tr')[1:]  # skip header
-                if not rows:
-                    continue
-
-                seen_md5s = set()
-                for tr in rows:
-                    tds = tr.find_all('td')
-                    if len(tds) < 5: continue
-
-                    # Extract author (col 1), title (col 2)
-                    author_td = tds[1] if len(tds) > 1 else None
-                    title_td = tds[2] if len(tds) > 2 else tds[0]
-
-                    author = author_td.get_text(' ', strip=True)[:80] if author_td else ''
-                    title_link = title_td.find('a', href=re.compile(r'book/index|/md5/', re.I)) or title_td.find('a')
-                    if not title_link: continue
-                    
-                    title_text = title_link.get_text(' ', strip=True)
-                    title = re.sub(r'\s*[:\-]\s*volume.*', '', title_text, flags=re.I).strip()
-
-                    # Extension and size: try common column positions
-                    ext = size = ''
-                    for col_idx in [8, 7, 6]:
-                        if len(tds) > col_idx:
-                            val = tds[col_idx].get_text(strip=True).lower()
-                            if val in ('epub','pdf','mobi','azw3','djvu','fb2','txt','doc','docx'):
-                                ext = val
-                                break
-                    for col_idx in [9, 8, 7]:
-                        if len(tds) > col_idx:
-                            val = tds[col_idx].get_text(strip=True)
-                            if re.search(r'\d+\s*[kmg]b', val, re.I):
-                                size = val
-                                break
-
-                    # Download link — find get.php or /get/ or actual md5 param
-                    dl_link = None
-                    for a in tr.find_all('a', href=True):
-                        href = a['href']
-                        if 'get.php' in href or '/get/' in href or 'md5=' in href.lower():
-                            dl_link = href
-                            break
-
-                    if not dl_link: continue
-
-                    # Make absolute URL
-                    if dl_link.startswith('http'):
-                        full_dl = dl_link
-                    elif dl_link.startswith('/'):
-                        full_dl = base + dl_link
-                    else:
-                        full_dl = base + '/' + dl_link
-
-                    # Extract md5 for dedup
-                    md5_match = re.search(r'md5=([a-f0-9]+)', dl_link, re.I)
-                    md5 = md5_match.group(1).lower() if md5_match else dl_link
-
-                    if md5 in seen_md5s: continue
-                    seen_md5s.add(md5)
-
-                    info_parts = [x.upper() for x in [ext] if x] + [size]
-                    info = ' · '.join(p for p in info_parts if p)
-
-                    results.append({
-                        'source': 'LibGen',
-                        'title': f"{title} — {author}" if author else title,
-                        'info': info,
-                        'url': full_dl,
-                        'id': md5,
-                        'coverUrl': self._get_cover(title)
-                    })
-
-                if results:
-                    break  # Found results, stop trying mirrors
-
-            except Exception as e:
-                print(f"LibGen mirror {mirror_url} failed: {e}")
-                continue
-
+                table = soup.find('table', id='tablelibgen')
+                if table:
+                    for tr in table.find_all('tr')[1:]:
+                        tds = tr.find_all('td')
+                        if len(tds) < 10: continue
+                        author = tds[1].get_text().strip()
+                        title_link = tds[2].find('a')
+                        if not title_link: continue
+                        title = re.sub(r'\(.*?\)', '', title_link.get_text().strip()).strip()
+                        ext = tds[8].get_text().strip().lower()
+                        size = tds[9].get_text().strip()
+                        dl_link = tds[2].find('a', href=re.compile(r'get\.php'))
+                        if not dl_link: continue
+                        md5 = dl_link['href'].split('md5=')[-1]
+                        results.append({
+                            'source': 'LibGen',
+                            'title': f"{title} - {author}",
+                            'info': f"{ext.upper()} | {size}",
+                            'url': f"https://libgen.li/{dl_link['href']}",
+                            'id': md5,
+                            'coverUrl': self._get_cover(title)
+                        })
+        except Exception as e:
+            print(f"LibGen Error: {e}")
         return results
 
     def search_bookys(self, query):
-        """Scrape bookys-ebooks.com — protégé par Cloudflare, utilise cloudscraper"""
+        """Scrape bookys-ebooks.com via cloudscraper (Cloudflare bypass)"""
         results = []
-        base_urls = [
-            "https://www6.bookys-ebooks.com",
-            "https://www.bookys-ebooks.com",
-            "https://bookys-ebooks.com",
-        ]
+        base = "https://www6.bookys-ebooks.com"
         try:
             import cloudscraper
             scraper = cloudscraper.create_scraper(
                 browser={'browser': 'chrome', 'platform': 'linux', 'desktop': True}
             )
-            headers = {'Accept-Language': 'fr-FR,fr;q=0.9,en;q=0.5'}
-
-            html = None
-            base = base_urls[0]
-            for b in base_urls:
-                try:
-                    r = scraper.get(f"{b}/?s={urllib.parse.quote(query)}", headers=headers, timeout=8)
-                    if r.status_code == 200 and len(r.text) > 2000:
-                        html = r.text
-                        base = b
-                        break
-                except Exception as e:
-                    print(f"Bookys {b}: {e}")
-                    continue
-
-            if not html:
+            r = scraper.get(f"{base}/?s={urllib.parse.quote(query)}",
+                            headers={'Accept-Language': 'fr-FR,fr;q=0.9'}, timeout=8)
+            if r.status_code != 200 or len(r.text) < 2000:
                 return results
 
-            soup = BeautifulSoup(html, 'html.parser')
-
-            # Multiple layout strategies:
-            # 1. Standard WordPress articles (most common)
-            articles = soup.select('article.post, article.type-post, article.hentry')
-            # 2. bys- prefixed classes (newer layout)
-            if not articles:
-                articles = soup.select('[class*="bys-"]')
-            # 3. Generic .news or .item classes
-            if not articles:
-                articles = soup.select('.news, .item, .book-item')
-            # 4. Any article tag
-            if not articles:
-                articles = soup.find_all('article')
-            # 5. Last fallback: divs containing internal links
-            if not articles:
-                articles = [a.find_parent('div') for a in soup.find_all('a', href=re.compile(f'^{re.escape(base)}/')) if a.find_parent('div')]
-                articles = [a for a in articles if a][:20]
+            soup = BeautifulSoup(r.text, 'html.parser')
+            articles = (soup.select('article.post, article.type-post, article.hentry') or
+                        soup.find_all('article') or
+                        soup.select('.news, .item, .book-item'))
 
             seen_hrefs = set()
-            for item in articles[:25]:
-                # Get the main link
-                # Prioritize the first internal link (not a category, not a tag)
-                main_link = None
+            for item in articles[:20]:
+                # Premier lien interne valide (pas cat/tag/author)
+                href = ''
+                a_tag = None
                 for a in item.find_all('a', href=True):
-                    href = a['href']
-                    if not href.startswith('http'):
-                        href = base + href
-                    # Skip category/tag/author links
-                    if any(x in href for x in ['/category/', '/tag/', '/author/', '#']):
-                        continue
-                    # Must point to the same domain
-                    if any(b.replace('https://', '').replace('http://', '') in href for b in base_urls):
-                        main_link = (a, href)
+                    h = a['href']
+                    if not h.startswith('http'): h = base + h
+                    if any(x in h for x in ['/category/', '/tag/', '/author/', '#']): continue
+                    if 'bookys-ebooks.com' in h:
+                        href, a_tag = h, a
                         break
-                
-                if not main_link: continue
-                a_tag, href = main_link
-                if href in seen_hrefs: continue
+                if not href or href in seen_hrefs: continue
                 seen_hrefs.add(href)
 
-                # Title
                 title_el = item.find(['h1','h2','h3','h4'])
-                if title_el:
-                    title = title_el.get_text(' ', strip=True)
-                else:
-                    title = a_tag.get('title') or a_tag.get_text(' ', strip=True)
+                title = title_el.get_text(' ', strip=True) if title_el else (a_tag.get('title') or a_tag.get_text(' ', strip=True))
                 title = re.sub(r'[\r\n\t]+', ' ', title).strip()
                 if not title or len(title) < 3: continue
 
-                # Cover image (try data-src for lazy loading, then src)
                 img = item.find('img')
                 cover_url = ''
                 if img:
                     cover_url = img.get('data-lazy-src') or img.get('data-src') or img.get('src') or ''
-                    if cover_url and not cover_url.startswith('http'):
-                        cover_url = base + cover_url
-                    # Skip base64 placeholders and tiny images
-                    if cover_url.startswith('data:') or 'blank' in cover_url.lower():
-                        cover_url = ''
+                    if cover_url.startswith('data:') or 'blank' in cover_url: cover_url = ''
+                if not cover_url: cover_url = self._get_cover(title)
 
-                if not cover_url:
-                    cover_url = self._get_cover(title)
-
-                # Info: author, category, format
-                info_parts = []
-                for sel in ['.entry-meta', '.post-meta', '.news-meta', '[class*="meta"]', '[class*="author"]', '[class*="cat"]']:
-                    el = item.select_one(sel)
-                    if el:
-                        txt = el.get_text(' ', strip=True)[:80]
-                        if txt: info_parts.append(txt)
-                        break
-                # Also check for explicit format tags
-                for tag_el in item.find_all(class_=re.compile(r'format|epub|pdf', re.I)):
-                    t = tag_el.get_text(strip=True)
-                    if t and t not in info_parts: info_parts.append(t)
-
-                info = ' · '.join(info_parts) if info_parts else 'Ebook FR'
+                info_el = item.select_one('.entry-meta, .post-meta, [class*="meta"], [class*="cat"]')
+                info = info_el.get_text(' ', strip=True)[:60] if info_el else 'Ebook FR'
 
                 results.append({
                     'source': 'Bookys',
@@ -417,7 +239,7 @@ class BookDownloader:
                     'bookys_direct': True
                 })
         except ImportError:
-            print("cloudscraper not installed — run: pip install cloudscraper")
+            print("cloudscraper not installed")
         except Exception as e:
             print(f"Bookys Error: {e}")
         return results
@@ -631,7 +453,6 @@ def api_trending():
 @login_required
 def api_search():
     from concurrent.futures import ThreadPoolExecutor, wait as fwait
-
     query = request.args.get('q', '')
     source = request.args.get('source', 'all')  # all | annas | libgen | bookys
     if not query:
@@ -646,19 +467,15 @@ def api_search():
         if source in ('all', 'bookys'):
             futures[executor.submit(downloader.search_bookys, query)] = 'bookys'
 
-        # Single global 12s timeout across ALL scrapers running in parallel
         done, not_done = fwait(futures.keys(), timeout=12)
-
-        for future in not_done:
-            print(f"[search] {futures[future]} timed out")
-            future.cancel()
+        for f in not_done:
+            print(f"[search] {futures[f]} timed out")
+            f.cancel()
 
         results = []
-        for future in done:
-            try:
-                results.extend(future.result())
-            except Exception as e:
-                print(f"[search] {futures.get(future,'?')} error: {e}")
+        for f in done:
+            try: results.extend(f.result())
+            except Exception as e: print(f"[search] error: {e}")
 
     seen = set()
     unique = []
@@ -691,14 +508,6 @@ def api_download():
         success, msg = downloader.download_slow(url, filename)
     else:
         success, msg = downloader.download_file(url, filename)
-        
-    if success:
-        try:
-            import subprocess
-            subprocess.run(["curl", "-H", "Tags: green_book", "-H", "Title: Nouveau livre !", "-d", f"{filename} a été téléchargé", "https://ntfy.sh/sabu"], timeout=5)
-        except Exception as e:
-            print("Erreur curl:", e)
-            
     return jsonify({'success': success, 'message': msg})
 
 @limiter.request_filter
