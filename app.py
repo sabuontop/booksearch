@@ -180,6 +180,60 @@ class BookDownloader:
             print(f"LibGen Error: {e}")
         return results
 
+    def search_bookys(self, query):
+        """Scrape bookys-ebooks.com — site francophone d'ebooks"""
+        results = []
+        base = "https://www6.bookys-ebooks.com"
+        try:
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+                'Referer': base + '/',
+                'Accept-Language': 'fr-FR,fr;q=0.9'
+            }
+            search_url = f"{base}/?s={urllib.parse.quote(query)}"
+            r = requests.get(search_url, headers=headers, timeout=15)
+            if r.status_code == 200:
+                soup = BeautifulSoup(r.text, 'html.parser')
+                articles = soup.select('article') or soup.select('.post') or soup.select('.item-list li')
+                for article in articles[:20]:
+                    link = article.find('a', href=True)
+                    if not link: continue
+                    href = link['href']
+                    if not href.startswith('http'): href = base + href
+
+                    # Title
+                    title_el = article.find(['h2','h3','h4']) or article.find(class_=re.compile(r'title|entry-title', re.I))
+                    title = title_el.get_text(strip=True) if title_el else link.get_text(strip=True)
+                    if not title or len(title) < 3: continue
+
+                    # Cover
+                    img = article.find('img')
+                    cover_url = ''
+                    if img:
+                        cover_url = img.get('data-src') or img.get('src') or ''
+                        if cover_url and not cover_url.startswith('http'):
+                            cover_url = base + cover_url
+
+                    if not cover_url:
+                        cover_url = self._get_cover(title)
+
+                    # Info (catégorie/auteur)
+                    info_el = article.find(class_=re.compile(r'category|cat|meta|author', re.I))
+                    info = info_el.get_text(strip=True)[:60] if info_el else 'EPUB/PDF'
+
+                    results.append({
+                        'source': 'Bookys',
+                        'title': title,
+                        'info': info,
+                        'url': href,
+                        'id': href,
+                        'coverUrl': cover_url,
+                        'bookys_direct': True
+                    })
+        except Exception as e:
+            print(f"Bookys Error: {e}")
+        return results
+
     def get_annas_details(self, md5_url):
         try:
             r = self.session.get(md5_url, timeout=20)
@@ -389,11 +443,18 @@ def api_trending():
 @login_required
 def api_search():
     query = request.args.get('q', '')
+    source = request.args.get('source', 'all')  # all | annas | libgen | bookys
     if not query:
         return jsonify([])
-    annas = downloader.search_annasarchive(query)
-    libgen = downloader.search_libgen(query)
-    results = annas + libgen
+
+    results = []
+    if source in ('all', 'annas'):
+        results += downloader.search_annasarchive(query)
+    if source in ('all', 'libgen'):
+        results += downloader.search_libgen(query)
+    if source in ('all', 'bookys'):
+        results += downloader.search_bookys(query)
+
     seen = set()
     unique = []
     for r in results:

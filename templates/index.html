@@ -302,9 +302,45 @@
             color: #fff;
         }
 
+        .badge-bookys {
+            background: rgba(236, 72, 153, 0.85);
+            color: #fff;
+        }
+
         .badge-other {
             background: rgba(34, 197, 94, 0.85);
             color: #000;
+        }
+
+        /* ── SOURCE FILTERS ── */
+        .source-filters {
+            display: flex;
+            gap: 0.5rem;
+            flex-wrap: wrap;
+            margin-bottom: 1.5rem;
+        }
+
+        .filter-btn {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 20px;
+            padding: 0.35rem 1rem;
+            color: var(--muted);
+            font-size: 0.8rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .filter-btn:hover {
+            border-color: var(--primary);
+            color: var(--text);
+        }
+
+        .filter-btn.active {
+            background: linear-gradient(135deg, var(--primary), var(--primary2));
+            border-color: transparent;
+            color: #fff;
         }
 
         .book-meta {
@@ -527,7 +563,7 @@
     <main>
         <div id="loading">
             <div class="spinner"></div>
-            <p>Recherche sur Anna's Archive & LibGen...</p>
+            <p id="loadingText">Recherche en cours...</p>
         </div>
 
         <div id="trendingSection">
@@ -536,6 +572,12 @@
         </div>
 
         <div id="resultsSection" style="display:none">
+            <div class="source-filters">
+                <button class="filter-btn active" onclick="setSource('all', this)">🌐 Toutes les sources</button>
+                <button class="filter-btn" onclick="setSource('annas', this)">🟡 Anna's Archive</button>
+                <button class="filter-btn" onclick="setSource('libgen', this)">🟣 LibGen</button>
+                <button class="filter-btn" onclick="setSource('bookys', this)">🩷 Bookys</button>
+            </div>
             <p class="section-title" id="resultsTitle">Résultats</p>
             <div class="book-grid" id="resultsGrid"></div>
         </div>
@@ -563,10 +605,21 @@
         const searchInput = document.getElementById('searchInput');
         searchInput.addEventListener('keydown', e => { if (e.key === 'Enter') doSearch(); });
 
+        let activeSource = 'all';
+        let lastQuery = '';
+
+        function setSource(src, btn) {
+            activeSource = src;
+            document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            if (lastQuery) doSearch();
+        }
+
         function getSourceBadgeClass(source) {
             const s = source.toLowerCase();
             if (s.includes('anna')) return 'badge-anna';
             if (s.includes('libgen')) return 'badge-libgen';
+            if (s.includes('bookys')) return 'badge-bookys';
             return 'badge-other';
         }
 
@@ -624,13 +677,17 @@
         function doSearch() {
             const q = searchInput.value.trim();
             if (!q) return;
+            lastQuery = q;
 
             document.getElementById('trendingSection').style.display = 'none';
             document.getElementById('resultsSection').style.display = 'none';
             document.getElementById('emptyState').style.display = 'none';
             document.getElementById('loading').style.display = 'block';
 
-            fetch(`/api/search?q=${encodeURIComponent(q)}`)
+            const sourceLabels = { all: "Anna's Archive, LibGen & Bookys", annas: "Anna's Archive", libgen: 'LibGen', bookys: 'Bookys' };
+            document.getElementById('loadingText').textContent = `Recherche sur ${sourceLabels[activeSource] || 'toutes les sources'}...`;
+
+            fetch(`/api/search?q=${encodeURIComponent(q)}&source=${activeSource}`)
                 .then(r => r.json())
                 .then(books => {
                     document.getElementById('loading').style.display = 'none';
@@ -656,6 +713,12 @@
             if (book.url && book.url.startsWith('/search?q=')) {
                 const q = new URLSearchParams(book.url.slice(8)).get('q');
                 if (q) { searchInput.value = q; doSearch(); return; }
+            }
+
+            // Bookys : ouvrir la page directement dans un nouvel onglet
+            if (book.source === 'Bookys') {
+                window.open(book.url, '_blank');
+                return;
             }
 
             // LibGen : téléchargement direct
