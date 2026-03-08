@@ -10,7 +10,7 @@ from flask_cors import CORS
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 import secrets
-from functools import wraps
+from functools import wraps, lru_cache
 from datetime import timedelta
 
 app = Flask(__name__)
@@ -72,17 +72,19 @@ class BookDownloader:
             "https://fr.annas-archive.gd"
         ]
         self.current_annas = self.annas_domains[0]
+        self.cloud_scraper = None
 
     def _get_cover(self, title):
         """Couverture OpenLibrary (gratuit, sans API key)"""
         return f"https://covers.openlibrary.org/b/title/{urllib.parse.quote(title)}-M.jpg"
 
+    @lru_cache(maxsize=50)
     def search_annasarchive(self, query):
         results = []
         url = f"{self.current_annas}/search"
         params = {'q': query}
         try:
-            r = self.session.get(url, params=params, timeout=15)
+            r = self.session.get(url, params=params, timeout=7)
             if r.status_code == 200:
                 soup = BeautifulSoup(r.text, 'html.parser')
                 for a in soup.find_all('a', href=re.compile(r'/md5/')):
@@ -146,12 +148,13 @@ class BookDownloader:
             print(f"Error Anna's Archive: {e}")
         return results
 
+    @lru_cache(maxsize=50)
     def search_libgen(self, query):
         url = "https://libgen.li/index.php"
         params = {'req': query, 'column': 'def'}
         results = []
         try:
-            r = self.session.get(url, params=params, timeout=15)
+            r = self.session.get(url, params=params, timeout=6)
             if r.status_code == 200:
                 soup = BeautifulSoup(r.text, 'html.parser')
                 table = soup.find('table', id='tablelibgen')
@@ -180,17 +183,19 @@ class BookDownloader:
             print(f"LibGen Error: {e}")
         return results
 
+    @lru_cache(maxsize=50)
     def search_bookys(self, query):
         """Scrape bookys-ebooks.com via cloudscraper (Cloudflare bypass)"""
         results = []
         base = "https://www6.bookys-ebooks.com"
         try:
-            import cloudscraper
-            scraper = cloudscraper.create_scraper(
-                browser={'browser': 'chrome', 'platform': 'linux', 'desktop': True}
-            )
-            r = scraper.get(f"{base}/?s={urllib.parse.quote(query)}",
-                            headers={'Accept-Language': 'fr-FR,fr;q=0.9'}, timeout=8)
+            if not self.cloud_scraper:
+                import cloudscraper
+                self.cloud_scraper = cloudscraper.create_scraper(
+                    browser={'browser': 'chrome', 'platform': 'linux', 'desktop': True}
+                )
+            r = self.cloud_scraper.get(f"{base}/?s={urllib.parse.quote(query)}",
+                            headers={'Accept-Language': 'fr-FR,fr;q=0.9'}, timeout=7)
             if r.status_code != 200 or len(r.text) < 2000:
                 return results
 
@@ -500,7 +505,7 @@ def api_search():
         if source in ('all', 'bookys'):
             futures[executor.submit(downloader.search_bookys, query)] = 'bookys'
 
-        done, not_done = fwait(futures.keys(), timeout=12)
+        done, not_done = fwait(futures.keys(), timeout=7.5)
         for f in not_done:
             print(f"[search] {futures[f]} timed out")
             f.cancel()
