@@ -81,9 +81,9 @@ class BookDownloader:
         results = []
         # Try multiple mirrors in order until one works
         mirrors = [
-            "https://fr.annas-archive.se",
+            "https://fr.annas-archive.pk",   # works from VPS
             "https://fr.annas-archive.gs",
-            "https://fr.annas-archive.pk",
+            "https://fr.annas-archive.se",
             "https://fr.annas-archive.org",
         ]
         for mirror in mirrors:
@@ -185,7 +185,7 @@ class BookDownloader:
     def search_libgen(self, query):
         results = []
         mirrors = [
-            "https://libgen.li/index.php",
+            "https://libgen.li/index.php",   # works from VPS
             "https://libgen.is/search.php",
             "https://libgen.rs/search.php",
         ]
