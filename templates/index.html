@@ -727,37 +727,9 @@
                 return;
             }
 
-            // Anna's Archive : afficher les liens
+            // Anna's Archive ou autres : téléchargement automatique (sans modal)
             if (book.url) {
-                document.getElementById('modalTitle').textContent = book.title;
-                document.getElementById('modalContent').innerHTML = '<div class="spinner" style="margin: 2rem auto"></div>';
-                document.getElementById('modalOverlay').classList.add('open');
-
-                fetch(`/api/details?url=${encodeURIComponent(book.url)}`)
-                    .then(r => r.json())
-                    .then(data => {
-                        if (!data) { document.getElementById('modalContent').innerHTML = '<p style="color:var(--muted)">Aucun lien disponible.</p>'; return; }
-                        let html = '';
-                        if (data.external && data.external.length > 0) {
-                            html += `<p class="modal-section-title">⚡ Miroirs Rapides</p><div class="links-grid">`;
-                            data.external.forEach(l => {
-                                html += `<button class="link-btn fast" onclick="download('${l.url}','${book.title.replace(/'/g, "\\'")}','external')">⬇ ${l.text}</button>`;
-                            });
-                            html += '</div>';
-                        }
-                        if (data.slow && data.slow.length > 0) {
-                            html += `<p class="modal-section-title">🕐 Serveurs Lents</p><div class="links-grid">`;
-                            data.slow.forEach(l => {
-                                html += `<button class="link-btn" onclick="download('${l.url}','${book.title.replace(/'/g, "\\'")}','slow')">▶ ${l.text}</button>`;
-                            });
-                            html += '</div>';
-                        }
-                        if (!html) html = '<p style="color:var(--muted)">Aucun lien disponible.</p>';
-                        document.getElementById('modalContent').innerHTML = html;
-                    })
-                    .catch(() => {
-                        document.getElementById('modalContent').innerHTML = '<p style="color:var(--muted)">Erreur de chargement.</p>';
-                    });
+                download(book.url, book.title, 'auto');
             }
         }
 
