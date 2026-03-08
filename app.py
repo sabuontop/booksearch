@@ -27,7 +27,7 @@ limiter = Limiter(
 )
 
 # Config
-DOWNLOAD_DIR = os.environ.get('BOOKLORE_DIR', '/opt/booklore/bookdrop')
+DOWNLOAD_DIR = os.environ.get('BOOKLORE_DIR', '/srv/booklore/bookdrop')
 CONFIG_FILE = os.environ.get('CONFIG_FILE', 'config.json')
 SEARCH_PASSWORD = os.environ.get('SEARCH_PASSWORD', 'changeme')
 
@@ -259,7 +259,7 @@ class BookDownloader:
                         if m: wait_time = int(m.group(1))
                     except: pass
                     links['slow'].append({'text': a.get_text().strip(), 'url': slow_url, 'wait_time': wait_time})
-                
+
                 ext_div = soup.find(['h3', 'div'], string=re.compile(r'téléchargements externes|external downloads', re.I))
                 if not ext_div:
                     for tag in soup.find_all(['h3', 'div']):
@@ -285,22 +285,22 @@ class BookDownloader:
     def download_file(self, url, filename):
         try:
             filename = re.sub(r'[\\/*?:"<>|]', "", filename)
-            if not os.path.exists(DOWNLOAD_DIR): 
+            if not os.path.exists(DOWNLOAD_DIR):
                 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
-            
+
             with self.session.get(url, stream=True, timeout=60, verify=False) as r:
                 r.raise_for_status()
-                
+
                 ext = ""
                 ct = r.headers.get('Content-Type', '').lower()
                 if 'application/pdf' in ct: ext = '.pdf'
                 elif 'epub' in ct: ext = '.epub'
                 elif 'mobi' in ct: ext = '.mobi'
-                
+
                 cd = r.headers.get('Content-Disposition', '')
                 if 'filename=' in cd:
                     m = re.search(r'filename=["\']?([^"\';]+)', cd)
-                    if m: 
+                    if m:
                         real_ext = os.path.splitext(m.group(1))[-1].lower()
                         if real_ext in ['.pdf', '.epub', '.mobi', '.azw3']: ext = real_ext
 
@@ -309,7 +309,7 @@ class BookDownloader:
                     first_chunk = next(chunk_iter)
                 except StopIteration:
                     first_chunk = b""
-                
+
                 if first_chunk.startswith(b"%PDF"):
                     ext = '.pdf'
                 elif b"BOOKMOBI" in first_chunk[:1024]:
@@ -317,11 +317,11 @@ class BookDownloader:
                 elif first_chunk.startswith(b"PK\x03\x04"):
                     if b"mimetypeapplication/epub+zip" in first_chunk[:1024] or not ext:
                         ext = '.epub' if b"mimetype" in first_chunk else ext
-                
+
                 name, current_ext = os.path.splitext(filename)
                 if ext and current_ext.lower() != ext:
                     filename = name + ext
-                    
+
                 filepath = os.path.join(DOWNLOAD_DIR, filename)
                 with open(filepath, 'wb') as f:
                     if first_chunk: f.write(first_chunk)
@@ -338,15 +338,15 @@ class BookDownloader:
             r = self.session.get(slow_url, headers=headers, timeout=30)
             if "DDoS-Guard" in r.text or "Cloudflare" in r.text:
                 return False, "La sécurité bloque le téléchargement automatique. Utilisez un miroir externe."
-                
+
             soup = BeautifulSoup(r.text, 'html.parser')
             text_content = soup.get_text()
-            
+
             m = re.search(r'([0-9]+)\s*second', text_content, re.I)
             wait_time = int(m.group(1)) if m else 60
-            
+
             time.sleep(wait_time + 2)
-            
+
             r = self.session.get(slow_url, headers=headers, timeout=30)
             soup = BeautifulSoup(r.text, 'html.parser')
             final_link = None
@@ -365,16 +365,16 @@ class BookDownloader:
         try:
             import requests
             session = self.session
-            
+
             verify_cert = True
             if "library.lol" in url.lower() or "libgen" in url.lower():
                 verify_cert = False
             if any(d in url.lower() for d in mirrors):
                 import urllib3
                 if not verify_cert: urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-                
+
                 try:
-                    r = session.get(url, timeout=12, verify=verify_cert) 
+                    r = session.get(url, timeout=12, verify=verify_cert)
                 except requests.exceptions.Timeout:
                     return False, f"Le serveur miroir est hors ligne ou bloqué (Timeout)."
                 except requests.exceptions.SSLError:
@@ -384,7 +384,7 @@ class BookDownloader:
                         return False, "Erreur de connexion sécurisée au miroir."
                 except Exception as e:
                     return False, f"Erreur de connexion : {str(e)}"
-                    
+
                 soup = BeautifulSoup(r.text, 'html.parser')
                 z_down = soup.find('a', class_=re.compile(r'addDownloadedBook|download-button|btn-primary', re.I))
                 if not z_down: z_down = soup.find('a', string=re.compile(r'download|télécharger', re.I))
@@ -405,6 +405,39 @@ class BookDownloader:
             return False, "Automation not available for this link."
         except Exception as e:
             return False, str(e)
+
+    def download_auto(self, md5_url, filename):
+        details = self.get_annas_details(md5_url)
+        if not details:
+            return False, "Impossible de récupérer les détails (miroirs) pour ce livre."
+            
+        externals = details.get('external', [])
+        
+        # Optimize mirror order: Z-Library & Libgen prioritised
+        def get_priority(link):
+            url = link['url'].lower()
+            if 'z-lib' in url: return 1
+            if 'libgen.li' in url: return 2
+            if 'library.lol' in url: return 3
+            if 'libgen' in url: return 4
+            return 5
+            
+        externals.sort(key=get_priority)
+        
+        # Try prioritized external links
+        for link in externals:
+            success, msg = self.download_external(link['url'], filename, {})
+            if success:
+                return True, msg
+                
+        # Fallback to slow links
+        slows = details.get('slow', [])
+        for link in slows:
+            success, msg = self.download_slow(link['url'], filename)
+            if success:
+                return True, msg
+                
+        return False, "Tous les miroirs automatiques ont échoué."
 
 
 downloader = BookDownloader()
@@ -506,6 +539,8 @@ def api_download():
         success, msg = downloader.download_external(url, filename, config)
     elif dtype == 'slow':
         success, msg = downloader.download_slow(url, filename)
+    elif dtype == 'auto':
+        success, msg = downloader.download_auto(url, filename)
     else:
         success, msg = downloader.download_file(url, filename)
     return jsonify({'success': success, 'message': msg})
