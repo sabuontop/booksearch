@@ -630,18 +630,33 @@ def api_trending():
 @app.route('/api/search')
 @login_required
 def api_search():
+    from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError as FutureTimeout
+
     query = request.args.get('q', '')
     source = request.args.get('source', 'all')  # all | annas | libgen | bookys
     if not query:
         return jsonify([])
 
-    results = []
-    if source in ('all', 'annas'):
-        results += downloader.search_annasarchive(query)
-    if source in ('all', 'libgen'):
-        results += downloader.search_libgen(query)
-    if source in ('all', 'bookys'):
-        results += downloader.search_bookys(query)
+    # Build tasks to run in parallel
+    tasks = {}
+    with ThreadPoolExecutor(max_workers=3) as executor:
+        if source in ('all', 'annas'):
+            tasks['annas'] = executor.submit(downloader.search_annasarchive, query)
+        if source in ('all', 'libgen'):
+            tasks['libgen'] = executor.submit(downloader.search_libgen, query)
+        if source in ('all', 'bookys'):
+            tasks['bookys'] = executor.submit(downloader.search_bookys, query)
+
+        results = []
+        # Wait at most 12s total for all scrapers to complete
+        for name, future in tasks.items():
+            try:
+                res = future.result(timeout=12)
+                results.extend(res)
+            except FutureTimeout:
+                print(f"[search] {name} timed out after 12s, skipping")
+            except Exception as e:
+                print(f"[search] {name} error: {e}")
 
     seen = set()
     unique = []
